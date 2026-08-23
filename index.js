@@ -61,7 +61,7 @@ async function checkStreams() {
         console.log(`New broadcast found for ${stream.user_name}! Sending alert...`);
         
         await axios.post(WEBHOOK_URL, {
-          content: `---------------------------------\n🚨 **${stream.user_name}** is live playing **${stream.game_name}**!`,
+          content: `\n🚨 **${stream.user_name}** is live playing **${stream.game_name}**!`,
           embeds: [{
             title: `🔴 ${stream.user_name} is live!`,
             description: `${stream.user_name} is playing ${stream.game_name} live on Twitch.\n\nGo take a look:\nhttps://twitch.tv/${stream.user_name}`,
