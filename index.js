@@ -6,6 +6,7 @@ const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const GAME_ID = process.env.TWITCH_GAME_ID;
 const CACHE_FILE = 'notified.json';
+const EXPIRATION_HOURS = 24; // Time before forgetting an old stream ID
 
 async function getTwitchToken() {
   try {
@@ -20,7 +21,21 @@ async function getTwitchToken() {
 function loadNotified() {
   if (fs.existsSync(CACHE_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      const now = new Date().getTime();
+      const cleanedData = {};
+
+      // Filter out entries older than 24 hours to keep the cache clean
+      for (const [streamerId, info] of Object.entries(data)) {
+        // Support old format just in case, or new object format { streamId, timestamp }
+        const timestamp = typeof info === 'object' ? info.timestamp : 0;
+        const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
+
+        if (hoursElapsed < EXPIRATION_HOURS) {
+          cleanedData[streamerId] = info;
+        }
+      }
+      return cleanedData;
     } catch (e) {
       return {};
     }
@@ -37,7 +52,6 @@ async function checkStreams() {
   const notified = loadNotified();
   
   try {
-    // Requesting up to 100 streams from the category
     const res = await axios.get(`https://api.twitch.tv/helix/streams?game_id=${GAME_ID}&first=100`, {
       headers: {
         'Client-ID': CLIENT_ID,
@@ -53,8 +67,8 @@ async function checkStreams() {
         const streamerId = stream.user_id;
         const streamId = stream.id;
 
-        // If we already sent an alert for this specific broadcast, skip it
-        if (notified[streamerId] === streamId) {
+        // Check if we already notified this specific stream ID and it hasn't expired
+        if (notified[streamerId] && notified[streamerId].streamId === streamId) {
           continue;
         }
 
@@ -79,8 +93,11 @@ async function checkStreams() {
           }]
         });
 
-        // Mark this stream ID as notified
-        notified[streamerId] = streamId;
+        // Save stream ID along with the current timestamp
+        notified[streamerId] = {
+          streamId: streamId,
+          timestamp: new Date().getTime()
+        };
       }
 
       saveNotified(notified);
