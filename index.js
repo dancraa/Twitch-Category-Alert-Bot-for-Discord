@@ -4,7 +4,7 @@ import fs from 'fs';
 const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-const GAME_ID = process.env.TWITCH_GAME_ID;
+const GAME_NAME = process.env.TWITCH_GAME_NAME || "Password Not Valid";
 const CACHE_FILE = 'notified.json';
 const EXPIRATION_HOURS = 24;
 
@@ -17,6 +17,28 @@ async function getTwitchToken() {
     return res.data.access_token;
   } catch (error) {
     console.error("Error getting Twitch token:", error.response?.data || error.message);
+    process.exit(1);
+  }
+}
+
+// Helper function to look up Game ID from Game Name
+async function getGameId(token, gameName) {
+  try {
+    const res = await axios.get(`https://api.twitch.tv/helix/games?name=${encodeURIComponent(gameName)}`, {
+      headers: {
+        'Client-ID': CLIENT_ID,
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (res.data.data && res.data.data.length > 0) {
+      return res.data.data[0].id;
+    } else {
+      console.error(`Game "${gameName}" not found on Twitch.`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error("Error fetching game ID:", error.response?.data || error.message);
     process.exit(1);
   }
 }
@@ -55,8 +77,13 @@ async function checkStreams() {
   // Create the file immediately so GitHub always has something to save
   saveNotified(notified);
   
+  // Step 1: Automatically fetch the Game ID using the Game Name
+  console.log(`Looking up game ID for "${GAME_NAME}"...`);
+  const gameId = await getGameId(token, GAME_NAME);
+  console.log(`Found Game ID: ${gameId}`);
+
   try {
-    const res = await axios.get(`https://api.twitch.tv/helix/streams?game_id=${GAME_ID}&first=100`, {
+    const res = await axios.get(`https://api.twitch.tv/helix/streams?game_id=${gameId}&first=100`, {
       headers: {
         'Client-ID': CLIENT_ID,
         'Authorization': `Bearer ${token}`
