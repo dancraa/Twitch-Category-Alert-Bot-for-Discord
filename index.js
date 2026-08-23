@@ -3,9 +3,8 @@ import axios from 'axios';
 const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-const GAME_ID = process.env.TWITCH_GAME_ID; // Numeric ID of the category/game
+const GAME_ID = process.env.TWITCH_GAME_ID;
 
-// Function to get a bearer token from Twitch OAuth
 async function getTwitchToken() {
   try {
     const res = await axios.post(`https://id.twitch.tv/oauth2/token?client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&grant_type=client_credentials`);
@@ -16,12 +15,11 @@ async function getTwitchToken() {
   }
 }
 
-// Function to check active streams under the specified category
 async function checkStreams() {
   const token = await getTwitchToken();
   
   try {
-    // Query active streams filtering by game_id, fetching up to the 5 most recent ones
+    console.log(`Searching streams for Game ID: ${GAME_ID}`);
     const res = await axios.get(`https://api.twitch.tv/helix/streams?game_id=${GAME_ID}&first=5`, {
       headers: {
         'Client-ID': CLIENT_ID,
@@ -30,6 +28,7 @@ async function checkStreams() {
     });
 
     const streams = res.data.data;
+    console.log(`Found ${streams.length} active streams from Twitch API.`);
 
     if (streams && streams.length > 0) {
       for (const stream of streams) {
@@ -37,11 +36,12 @@ async function checkStreams() {
         const now = new Date();
         const diffMinutes = (now - startedAt) / (1000 * 60);
 
-        // If the stream started less than 6 minutes ago (matching the cron frequency)
-        if (diffMinutes <= 6) {
-          console.log(`New stream detected in category ${stream.game_name} by ${stream.user_name}!`);
+        console.log(`Streamer: ${stream.user_name} | Started ${diffMinutes.toFixed(1)} minutes ago.`);
+
+        // Let's use 1440 minutes (24 hours) for testing so it triggers immediately
+        if (diffMinutes <= 1440) {
+          console.log(`-> Match! Sending notification to Discord for ${stream.user_name}...`);
           
-          // Send the notification to Discord using a webhook
           await axios.post(WEBHOOK_URL, {
             content: `---------------------------------\n🚨 **${stream.user_name}** is live playing **${stream.game_name}**!`,
             embeds: [{
@@ -60,10 +60,12 @@ async function checkStreams() {
               timestamp: new Date().toISOString(),
             }]
           });
+          // Stop after the first one during testing so we don't spam 5 messages at once
+          break; 
         }
       }
     } else {
-      console.log("No recent streams found in this category.");
+      console.log("No streams returned at all from API for this ID.");
     }
   } catch (error) {
     console.error("Error querying the Twitch API:", error.response?.data || error.message);
