@@ -6,7 +6,10 @@ const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const GAME_ID = process.env.TWITCH_GAME_ID;
 const CACHE_FILE = 'notified.json';
-const EXPIRATION_HOURS = 24; // Time before forgetting an old stream ID
+const EXPIRATION_HOURS = 24;
+
+// Helper function to pause the script so Discord doesn't block us
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function getTwitchToken() {
   try {
@@ -25,9 +28,7 @@ function loadNotified() {
       const now = new Date().getTime();
       const cleanedData = {};
 
-      // Filter out entries older than 24 hours to keep the cache clean
       for (const [streamerId, info] of Object.entries(data)) {
-        // Support old format just in case, or new object format { streamId, timestamp }
         const timestamp = typeof info === 'object' ? info.timestamp : 0;
         const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
 
@@ -51,6 +52,9 @@ async function checkStreams() {
   const token = await getTwitchToken();
   const notified = loadNotified();
   
+  // Create the file immediately so GitHub always has something to save
+  saveNotified(notified);
+  
   try {
     const res = await axios.get(`https://api.twitch.tv/helix/streams?game_id=${GAME_ID}&first=100`, {
       headers: {
@@ -67,40 +71,47 @@ async function checkStreams() {
         const streamerId = stream.user_id;
         const streamId = stream.id;
 
-        // Check if we already notified this specific stream ID and it hasn't expired
         if (notified[streamerId] && notified[streamerId].streamId === streamId) {
           continue;
         }
 
         console.log(`New broadcast found for ${stream.user_name}! Sending alert...`);
         
-        await axios.post(WEBHOOK_URL, {
-          content: `\n🚨 **${stream.user_name}** is live playing **${stream.game_name}**!`,
-          embeds: [{
-            title: `🔴 ${stream.user_name} is live!`,
-            description: `${stream.user_name} is playing ${stream.game_name} live on Twitch.\n\nGo take a look:\nhttps://twitch.tv/${stream.user_name}`,
-            url: `https://twitch.tv/${stream.user_name}`,
-            color: 6570404,
-            fields: [
-              { name: "Streamer", value: stream.user_name, inline: true },
-              { name: "Game", value: stream.game_name, inline: true },
-              { name: "Viewers", value: stream.viewer_count.toString(), inline: true },
-            ],
-            image: {
-              url: stream.thumbnail_url.replace("{width}", "1280").replace("{height}", "720"),
-            },
-            timestamp: new Date().toISOString(),
-          }]
-        });
+        try {
+          await axios.post(WEBHOOK_URL, {
+            content: `\n🚨 **${stream.user_name}** is live playing **${stream.game_name}**!`,
+            embeds: [{
+              title: `🔴 ${stream.user_name} is live!`,
+              description: `${stream.user_name} is playing ${stream.game_name} live on Twitch.\n\nGo take a look:\nhttps://twitch.tv/${stream.user_name}`,
+              url: `https://twitch.tv/${stream.user_name}`,
+              color: 6570404,
+              fields: [
+                { name: "Streamer", value: stream.user_name, inline: true },
+                { name: "Game", value: stream.game_name, inline: true },
+                { name: "Viewers", value: stream.viewer_count.toString(), inline: true },
+              ],
+              image: {
+                url: stream.thumbnail_url.replace("{width}", "1280").replace("{height}", "720"),
+              },
+              timestamp: new Date().toISOString(),
+            }]
+          });
 
-        // Save stream ID along with the current timestamp
-        notified[streamerId] = {
-          streamId: streamId,
-          timestamp: new Date().getTime()
-        };
+          // Remember this stream and save immediately
+          notified[streamerId] = {
+            streamId: streamId,
+            timestamp: new Date().getTime()
+          };
+          saveNotified(notified);
+
+          // Wait 2 seconds before the next message
+          await sleep(2000);
+
+        } catch (discordError) {
+          console.error(`Failed to notify for ${stream.user_name}. Stopping to avoid rate limit bans.`, discordError.response?.data || discordError.message);
+          break; // Stop loop safely
+        }
       }
-
-      saveNotified(notified);
     } else {
       console.log("No streams found.");
     }
